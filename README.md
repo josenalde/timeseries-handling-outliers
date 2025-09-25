@@ -22,35 +22,22 @@ Choose forecasting models that can incorporate explanatory regressors:
 - Machine learning regressors (XGBoost, LGBM, Random Forests) → allow event features and interactions with seasonality/time.
 - Neural nets (N-BEATS, DeepAR, TFT) → can also use covariates and capture nonlinear impact of outliers.
 
-3. Handle Scale: Decompose “Normal” vs “Event” Sales
+1.3) Handle Scale: Decompose “Normal” vs “Event” Sales
 Model the series as a combination of two processes:
 Baseline_t = smooth component (trend, seasonality, autoregressive dynamics).
 EventImpact_t = modeled separately (binary flag, distribution of outlier sizes, or even a regression on known event drivers).
 This avoids contaminating your baseline dynamics with spikes.
 
-4. Distributional Forecasting
+1.4) Distributional Forecasting
 Instead of predicting only the mean, use models that estimate uncertainty or the full distribution:
 - Quantile regression (LightGBM, CatBoost with quantile loss).
 - Bayesian models (hierarchical time series, state-space).
 - These allow your forecasts to reflect the fact that “sometimes there are spikes.”
 
-5. If Events Are Random (Unobserved)
-If you don’t have explicit covariates to anticipate them:
-- Consider mixture models (e.g., two regimes: normal sales vs. accumulated sales).
-- Markov-switching state-space models or regime-switching ARIMA can help.
-This way, the model learns “most of the time baseline, sometimes spike regime.”
-
-✅ Practical approach I’d recommend:
-
-Engineer an “event flag” when spikes occur (and, if possible, a forward-looking indicator).
-Train a SARIMAX or Gradient Boosted Trees model with these flags as regressors.
-If events are not predictable, use a probabilistic model that allows heavy-tailed error distributions (e.g., Student-t innovations in ARIMA, or quantile regression forests).
-This way, you respect the business request to keep the outliers, but you also prevent them from corrupting the baseline dynamics, while still allowing your forecasts to reflect the possibility of “good” spikes.
-
 ### SARIMAX with an “event flag” as an exogenous variable.
 Imagine you have weekly revenue data over 3 years (sales), and you know which weeks had “accumulative events.”
 
-1. SARIMAX with Event Flag
+a) SARIMAX with Event Flag
 ```
 import pandas as pd
 import numpy as np
@@ -89,7 +76,7 @@ print(pred_mean.head())
 ```
 👉 Here, the event_flag allows the model to treat outliers not as noise but as structured shifts.
 
-2. Gradient Boosting (XGBoost)
+b) Gradient Boosting (XGBoost)
 ```
 from xgboost import XGBRegressor
 from sklearn.model_selection import train_test_split
@@ -120,18 +107,22 @@ y_pred = model.predict(X_test)
 print("Last predictions:", y_pred)
 ```
 👉 In this version, the event_flag + lag features let the ML model explicitly learn the spikes without distorting baseline seasonality.
-🔑 Takeaway:
+✅ Practical approach I’d recommend:
+Engineer an “event flag” when spikes occur (and, if possible, a forward-looking indicator).
+Train a SARIMAX or Gradient Boosted Trees model with these flags as regressors.
 
-With SARIMAX, the event flag enters as a deterministic regressor.
-With XGBoost (or any ML regressor), the event flag acts as a feature that conditions the prediction on whether an “accumulative event” is happening.
-
+## 2) If events are not predictable,:
+use a probabilistic model that allows heavy-tailed error distributions (e.g., Student-t innovations in ARIMA, or quantile regression forests). If you don’t have explicit covariates to anticipate them:
+- Consider mixture models (e.g., two regimes: normal sales vs. accumulated sales).
+- Markov-switching state-space models or regime-switching ARIMA can help.
+This way, the model learns “most of the time baseline, sometimes spike regime.”
+This way, you respect the business request to keep the outliers, but you also prevent them from corrupting the baseline dynamics, while still allowing your forecasts to reflect the possibility of “good” spikes.
 ### If events are not predictable in advance, you could model their probability instead (mixture models, heavy-tailed error distributions, quantile regression).
-Got it 👍 This is the tricky but very real-world case:
 👉 You don’t know the future event flags (company can’t tell you when “accumulative sales” will happen).
 That means you cannot just feed a binary event_flag into the forecast horizon. Instead, you need to make your model robust to spikes and allow them to show up probabilistically.
 Here are three strategies:
 
-1. Use Heavy-Tailed Error Distributions
+2.1) Use Heavy-Tailed Error Distributions
 If the “good outliers” are rare but impactful, a normal error assumption will underestimate them.
 Instead, use a distribution that tolerates fat tails:
 
@@ -154,29 +145,27 @@ print(res.summary())
 ```
 Here, the Student-t innovation helps capture outliers as part of the expected distribution rather than “breaking” the model.
 
-2. Probabilistic Forecasting with Regime Switching
+2.2) Probabilistic Forecasting with Regime Switching
 Model sales as two regimes:
 - Normal regime (baseline demand).
 - Spike regime (accumulated sales events).
 - A Markov-Switching Model (or Hidden Markov Model) can learn the probability of being in each regime, even if you don’t know the future events explicitly.
 Example (statsmodels Markov Switching):
-
-from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
-
-# Fit a two-regime Markov switching model
 ```
+from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
+# Fit a two-regime Markov switching model
+
 mod = MarkovRegression(df["sales"], k_regimes=2, trend='c', switching_variance=True)
 res = mod.fit()
 print(res.summary())
-```
-
 # Get regime probabilities
 probs = res.smoothed_marginal_probabilities
 df["regime_prob_spike"] = probs[1]
-👉 Here, regime 1 might represent “normal sales” and regime 2 the “spike weeks.”
-The forecast is then weighted by the probability of being in each regime.
+# Here, regime 1 might represent “normal sales” and regime 2 the “spike weeks.”
+# The forecast is then weighted by the probability of being in each regime.
+```
 
-3. Forecast Two Components Separately
+2.3) Forecast Two Components Separately
 Instead of lumping everything together:
 - Baseline_t → modeled with ARIMA, Prophet, or ML (smooth part).
 - Spikes_t → modeled as a counting process (frequency of events) × magnitude distribution.
@@ -185,7 +174,7 @@ Fit a distribution (e.g., Gamma or LogNormal) for how big they are.
 Then simulate future sales = baseline + random spikes.
 This is a stochastic simulation approach — your forecasts are scenario-based (with/without spikes), giving decision-makers a realistic uncertainty range.
 
-### Code for unforeseen spikes (good outliers)
+2.4) Two regime Markov
 ```
 import numpy as np
 import pandas as pd
@@ -242,7 +231,7 @@ ax[1].legend()
 plt.tight_layout()
 plt.show()
 ```
-### Forecasting with Regime Switching
+2.5) Regime switching
 ```
 import numpy as np
 import pandas as pd
