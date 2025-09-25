@@ -50,7 +50,7 @@ This way, you respect the business request to keep the outliers, but you also pr
 Imagine you have weekly revenue data over 3 years (sales), and you know which weeks had “accumulative events.”
 
 1. SARIMAX with Event Flag
-`python
+```
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
@@ -85,9 +85,11 @@ pred_mean = forecast.predicted_mean
 pred_ci = forecast.conf_int()
 
 print(pred_mean.head())
+```
 👉 Here, the event_flag allows the model to treat outliers not as noise but as structured shifts.
 
 2. Gradient Boosting (XGBoost)
+```
 from xgboost import XGBRegressor
 from sklearn.model_selection import train_test_split
 
@@ -115,6 +117,7 @@ model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 
 print("Last predictions:", y_pred)
+```
 👉 In this version, the event_flag + lag features let the ML model explicitly learn the spikes without distorting baseline seasonality.
 🔑 Takeaway:
 
@@ -138,7 +141,7 @@ Instead, use a distribution that tolerates fat tails:
 ➡️ This way, the model doesn’t need to know exactly when spikes happen, but it widens the forecast distribution to include them.
 
 Example (statsmodels SARIMAX with Student-t):
-
+```
 # Fit SARIMAX with t-distributed errors
 from arch.univariate import ARX, StudentsT
 
@@ -147,6 +150,7 @@ model.distribution = StudentsT()   # heavy tails
 res = model.fit()
 
 print(res.summary())
+```
 Here, the Student-t innovation helps capture outliers as part of the expected distribution rather than “breaking” the model.
 
 2. Probabilistic Forecasting with Regime Switching
@@ -159,9 +163,11 @@ Example (statsmodels Markov Switching):
 from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 
 # Fit a two-regime Markov switching model
+```
 mod = MarkovRegression(df["sales"], k_regimes=2, trend='c', switching_variance=True)
 res = mod.fit()
 print(res.summary())
+```
 
 # Get regime probabilities
 probs = res.smoothed_marginal_probabilities
@@ -178,10 +184,148 @@ Fit a distribution (e.g., Gamma or LogNormal) for how big they are.
 Then simulate future sales = baseline + random spikes.
 This is a stochastic simulation approach — your forecasts are scenario-based (with/without spikes), giving decision-makers a realistic uncertainty range.
 
-✅ Practical Recommendation for Business Case:
+### Code for unforeseen spikes (good outliers)
+```
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 
-If you can’t predict events:
-Use probabilistic forecasts (quantile regression or regime-switching).
-Show the business both the baseline forecast and a scenario forecast with spikes.
+# ------------------------
+# 1. Generate synthetic sales data
+# ------------------------
+np.random.seed(42)
+weeks = pd.date_range("2021-01-01", periods=156, freq="W")
 
-Communicate uncertainty explicitly (fan charts, prediction intervals).
+# baseline trend + noise
+baseline = 200 + np.cumsum(np.random.normal(0, 5, 156))
+
+# introduce "good outliers" (accumulative spikes)
+sales = baseline.copy()
+event_weeks = np.random.choice(range(156), size=12, replace=False)
+sales[event_weeks] += np.random.randint(80, 200, size=12)
+
+df = pd.DataFrame({"date": weeks, "sales": sales})
+
+# ------------------------
+# 2. Fit a 2-regime Markov Switching model
+# ------------------------
+mod = MarkovRegression(df["sales"], k_regimes=2, trend="c", switching_variance=True)
+res = mod.fit()
+
+print(res.summary())
+
+# ------------------------
+# 3. Get regime probabilities
+# ------------------------
+df["prob_regime0"] = res.smoothed_marginal_probabilities[0]  # normal regime
+df["prob_regime1"] = res.smoothed_marginal_probabilities[1]  # spike regime
+
+# ------------------------
+# 4. Visualization
+# ------------------------
+fig, ax = plt.subplots(2, 1, figsize=(12,6), sharex=True)
+
+# Sales series
+ax[0].plot(df["date"], df["sales"], label="Sales", color="black")
+ax[0].set_title("Sales with Accumulative Spikes (Good Outliers)")
+ax[0].legend()
+
+# Regime probabilities
+ax[1].plot(df["date"], df["prob_regime0"], label="P(Normal Regime)", color="blue")
+ax[1].plot(df["date"], df["prob_regime1"], label="P(Spike Regime)", color="red")
+ax[1].fill_between(df["date"], 0, df["prob_regime1"], color="red", alpha=0.2)
+ax[1].set_title("Smoothed Probabilities of Being in Spike Regime")
+ax[1].legend()
+
+plt.tight_layout()
+plt.show()
+```
+### Forecasting with Regime Switching
+```
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
+
+# ------------------------
+# 1. Generate synthetic sales data
+# ------------------------
+np.random.seed(42)
+weeks = pd.date_range("2021-01-01", periods=156, freq="W")
+
+baseline = 200 + np.cumsum(np.random.normal(0, 5, 156))
+sales = baseline.copy()
+event_weeks = np.random.choice(range(156), size=12, replace=False)
+sales[event_weeks] += np.random.randint(80, 200, size=12)
+
+df = pd.DataFrame({"date": weeks, "sales": sales})
+
+# ------------------------
+# 2. Fit 2-regime Markov Switching model
+# ------------------------
+mod = MarkovRegression(df["sales"], k_regimes=2, trend="c", switching_variance=True)
+res = mod.fit()
+
+print(res.summary())
+
+# ------------------------
+# 3. Get smoothed probabilities
+# ------------------------
+df["prob_regime0"] = res.smoothed_marginal_probabilities[0]
+df["prob_regime1"] = res.smoothed_marginal_probabilities[1]
+
+# ------------------------
+# 4. Forecast next 12 weeks
+# ------------------------
+n_forecast = 12
+last_state_probs = res.smoothed_marginal_probabilities.iloc[-1].values  # [P(reg0), P(reg1)]
+
+# Regime-specific means (constant terms)
+means = res.params[[0, 1]]  # intercepts of each regime
+
+# Transition probabilities matrix
+P = res.transition_matrix
+
+# Forecast storage
+forecast_dates = pd.date_range(df["date"].iloc[-1] + pd.Timedelta(weeks=1), periods=n_forecast, freq="W")
+forecast_sales = []
+forecast_probs = [last_state_probs]
+
+probs = last_state_probs
+for _ in range(n_forecast):
+    # Expected sales = weighted avg of regime means
+    forecast_sales.append(np.dot(probs, means))
+    # Update regime probabilities for next step
+    probs = probs @ P
+    forecast_probs.append(probs)
+
+forecast_df = pd.DataFrame({
+    "date": forecast_dates,
+    "forecast_sales": forecast_sales,
+    "prob_regime0": [p[0] for p in forecast_probs[1:]],
+    "prob_regime1": [p[1] for p in forecast_probs[1:]],
+})
+
+# ------------------------
+# 5. Visualization
+# ------------------------
+fig, ax = plt.subplots(2, 1, figsize=(12,7), sharex=True)
+
+# Historical + forecast sales
+ax[0].plot(df["date"], df["sales"], label="Historical Sales", color="black")
+ax[0].plot(forecast_df["date"], forecast_df["forecast_sales"], label="Forecast", color="green", marker="o")
+ax[0].set_title("Markov Switching Forecast (Normal vs Spike Regimes)")
+ax[0].legend()
+
+# Regime probabilities
+ax[1].plot(df["date"], df["prob_regime1"], label="P(Spike Regime, Historical)", color="red")
+ax[1].plot(forecast_df["date"], forecast_df["prob_regime1"], label="P(Spike Regime, Forecast)", color="orange", linestyle="--")
+ax[1].fill_between(df["date"], 0, df["prob_regime1"], color="red", alpha=0.2)
+ax[1].fill_between(forecast_df["date"], 0, forecast_df["prob_regime1"], color="orange", alpha=0.2)
+ax[1].set_title("Probability of Spike Regime")
+ax[1].legend()
+
+plt.tight_layout()
+plt.show()
+```
