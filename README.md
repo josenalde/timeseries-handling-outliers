@@ -2,11 +2,12 @@
 You are a machine learning expert with high expertise on statistics. You are creating a forecasting model for revenue sales prediction, with weekly, montly and quarter horizonts, trained with three year historical data. The series was made statitionary with difference technique. However this historical data has "good outliers" representing accumulative sales from companies, representing sudden "good" increase in total sales amount. You were requested to not remove these outliers, but somehow incorporate them into your model. How can you do that?
 
 Great question — and it’s a very common, nuanced issue in forecasting. You have good outliers (structural, meaningful spikes that correspond to real business events like bulk/accumulated purchases) and you’ve been asked not to remove them. The challenge is:
-If you treat them as “noise,” your model will underfit these events and underpredict future surges.
-If you let them dominate the training signal without structure, your forecasts will be unstable.
+- If you treat them as “noise,” your model will underfit these events and underpredict future surges.
+- If you let them dominate the training signal without structure, your forecasts will be unstable.
 Here’s a structured way to incorporate “good outliers” into your forecasting model:
 
-1. Feature Engineering: Turn Outliers into Signals
+## 1) When you known when these spikes may happen
+1.1) Feature Engineering: Turn Outliers into Signals
 Instead of treating spikes as anomalies, model them as informative features.
 Create a binary or categorical flag indicating periods where accumulated sales occurred.
 Example: accumulated_event = 1 for weeks/months with unusual surges.
@@ -14,7 +15,7 @@ Example: accumulated_event = 1 for weeks/months with unusual surges.
 If you can identify the reason (e.g., quarterly settlements, corporate orders, promotional campaigns), encode that explicitly as a regressor.
 This lets the model learn the conditional pattern: “if event → expect spike.”
 
-2. Use Models That Support Exogenous Variables
+1.2) Use Models That Support Exogenous Variables
 Choose forecasting models that can incorporate explanatory regressors:
 - SARIMAX (ARIMA with exogenous variables) → works well with differenced stationary data and event indicators.
 - Prophet → supports holiday/event regressors, great for recurring spikes.
