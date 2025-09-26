@@ -274,8 +274,13 @@ last_state_probs = res.smoothed_marginal_probabilities.iloc[-1].values  # [P(reg
 # Regime-specific means (constant terms)
 means = res.params[[0, 1]]  # intercepts of each regime
 
-# Transition probabilities matrix
-P = res.transition_matrix
+trans_mat = mod.regime_transition_matrix(res.params)   # <-- método do modelo, não do resultado
+# se time-varying: shape (k,k,nobs), senão (k,k)
+if trans_mat.ndim == 3:
+    # escolha a matriz no último instante observado para forecasting
+    P = trans_mat[:, :, -1]
+else:
+    P = trans_mat
 
 # Forecast storage
 forecast_dates = pd.date_range(df["date"].iloc[-1] + pd.Timedelta(weeks=1), periods=n_forecast, freq="W")
