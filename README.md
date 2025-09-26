@@ -324,3 +324,6 @@ ax[1].legend()
 plt.tight_layout()
 plt.show()
 ```
+## Ver também:
+https://medium.com/@deepml1818/python-for-regime-switching-models-in-quantitative-finance-c54d2710f71b
+
